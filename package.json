@@ -1,0 +1,73 @@
+{
+  "name": "orchestra",
+  "version": "2.9.0",
+  "description": "Multi-Model AI Orchestration System with Local Privacy",
+  "main": "electron/main.js",
+  "author": "Eric Varney",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "electron:build:appimage": "npm run build && electron-builder --linux AppImage",
+    "electron:build:deb": "npm run build && electron-builder --linux deb",
+    "electron:build:rpm": "npm run build && electron-builder --linux rpm"
+  },
+  "dependencies": {
+    "framer-motion": "^10.16.0",
+    "lucide-react": "^0.263.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.0",
+    "electron": "^25.3.0",
+    "electron-builder": "^24.6.3",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^4.3.9",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.orchestra.ai",
+    "productName": "Orchestra",
+    "copyright": "Copyright © 2026 Eric Varney",
+    "asar": true,
+    "asarUnpack": [
+      "backend/**/*"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "backend/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "maintainer": "Eric Varney",
+      "vendor": "Orchestra AI"
+    },
+    "appImage": {
+      "license": "LICENSE"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+# Orchestra Python Backend Requirements
+
+# Core Framework
+flask==3.0.0
+flask-cors==4.0.0
+
+# AI/ML
+ollama==0.1.0
+numpy==1.24.3
+torch==2.1.0
+
+# PDF Processing
+PyMuPDF==1.23.8
+
+# Image Generation
+diffusers==0.24.0
+safetensors==0.4.1
+huggingface-hub==0.19.4
+Pillow==10.1.0
+
+# Web Search
+duckduckgo-search==3.9.6
+
+# System Monitoring
+psutil==5.9.6
+
+# Symbolic Math
+sympy==1.12
+
+# Additional utilities
+python-dotenv==1.0.0
+requests==2.31.0

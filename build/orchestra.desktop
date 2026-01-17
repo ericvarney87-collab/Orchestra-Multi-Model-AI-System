@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Orchestra
+Comment=Multi-Model AI Orchestration System
+Exec=orchestra %U
+Icon=orchestra
+Terminal=false
+Categories=Utility;Development;Office;
+Keywords=AI;LLM;ChatBot;
+StartupWMClass=orchestra
