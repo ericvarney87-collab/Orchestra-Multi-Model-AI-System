@@ -1,190 +1,139 @@
-// main.js - Electron Main Process
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
-const express = require('express');
-
-app.disableHardwareAcceleration(); // Disable GPU for Windows compatibility
+const fs = require('fs');
 
 let mainWindow;
 let pythonProcess;
-let expressApp;
-let expressServer;
 
-// Configuration
-const FLASK_PORT = 5000;
-const EXPRESS_PORT = 3000;
-
-function startExpressServer() {
-  expressApp = express();
-  
-  // Serve static UI files
-  expressApp.use(express.static(path.join(__dirname, 'ui')));
-  
-  // Proxy API requests to Flask
-  expressApp.use('/api', async (req, res) => {
-    try {
-      const fetch = (await import('node-fetch')).default;
-      const response = await fetch('http://localhost:' + FLASK_PORT + req.path, {
-        method: req.method,
-        headers: req.headers,
-        body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined
-      });
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-  
-  expressServer = expressApp.listen(EXPRESS_PORT, () => {
-    console.log('UI Server running on port ' + EXPRESS_PORT);
-  });
-}
-
-// Start Python backend
 function startPythonBackend() {
-  const pythonPath = process.platform === 'win32' ? 'python.exe' : 'python3';
-  const scriptPath = path.join(__dirname, 'backend', 'orchestra_api.py');
+  const isPackaged = app.isPackaged;
+  const backendPath = isPackaged 
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'backend')
+    : path.join(__dirname, '../backend');
   
-  console.log('🤖 Starting Python backend...');
+  const pythonScript = path.join(backendPath, 'orchestra_api.py');
+  console.log('Starting Python backend:', pythonScript);
   
-  pythonProcess = spawn(pythonPath, [scriptPath], {
-    env: { 
-      ...process.env, 
-      PYTHONUNBUFFERED: '1',
-      PYTHONPATH: `${process.env.HOME}/.local/lib/python3.12/site-packages:${process.env.PYTHONPATH || ''}`
-    }
+  pythonProcess = spawn('python3', [pythonScript], {
+    cwd: backendPath,
+    env: { ...process.env }
   });
   
   pythonProcess.stdout.on('data', (data) => {
-    console.log(`[Python] ${data.toString()}`);
+    console.log(`[Python] ${data.toString().trim()}`);
   });
   
   pythonProcess.stderr.on('data', (data) => {
-    console.error(`[Python Error] ${data.toString()}`);
-  });
-  
-  pythonProcess.on('close', (code) => {
-    console.log(`Python process exited with code ${code}`);
+    console.error(`[Python Error] ${data.toString().trim()}`);
   });
 }
 
-// Create main window
-function createWindow() {
+async function waitForBackend(maxWait = 15000) {
+  const startTime = Date.now();
+  const http = require('http');
+  
+  return new Promise((resolve) => {
+    const checkBackend = () => {
+      http.get('http://localhost:5000/api/health', (res) => {
+        if (res.statusCode === 200) {
+          console.log('✅ Backend is ready!');
+          resolve(true);
+        } else {
+          retry();
+        }
+      }).on('error', retry);
+    };
+    
+    const retry = () => {
+      if (Date.now() - startTime < maxWait) {
+        setTimeout(checkBackend, 500);
+      } else {
+        console.log('⚠️ Backend timeout, opening anyway...');
+        resolve(false);
+      }
+    };
+    
+    checkBackend();
+  });
+}
+
+async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1800,
-    height: 1000,
-    minWidth: 1200,
-    minHeight: 800,
-    backgroundColor: '#0a0a0f',
+    width: 1400,
+    height: 900,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webviewTag: true,  // ADD THIS LINE
-      preload: path.join(__dirname, 'preload.js')
-  },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    show: true
+      webviewTag: true,
+      preload: path.join(__dirname, 'preload.js'),
+      webSecurity: true,  // Keep browser security ON
+      // SECURITY: Allow loading code execution result files from /tmp
+      // These are user-approved code execution outputs, not arbitrary files
+      allowFileAccessFromFileURLs: true
+    },
+    backgroundColor: '#0a0e1a',
+    show: false
   });
-  
-  mainWindow.loadURL('http://localhost:' + EXPRESS_PORT);
-  
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-}
 
-// Wait for servers to be ready
-async function waitForServer(port, maxAttempts = 120) {
-  const fetch = (await import('node-fetch')).default;
-  
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      await fetch('http://localhost:' + port + '/api/health');
-      return true;
-    } catch (error) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+  // SECURITY: Set up Content Security Policy for code execution results
+  // Allow file:// only for /tmp directory (where code results are stored)
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    // Only modify headers for our code execution result files
+    if (details.url.startsWith('file:///tmp/')) {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self' 'unsafe-inline' file: http://localhost:5000; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "style-src 'self' 'unsafe-inline';"
+          ]
+        }
+      });
+    } else {
+      callback({ responseHeaders: details.responseHeaders });
     }
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
+  if (app.isPackaged) {
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
+    mainWindow.loadFile(indexPath);
+  } else {
+    mainWindow.loadURL('http://localhost:5173');
   }
-  return false;
 }
 
-// App lifecycle
 app.whenReady().then(async () => {
-  console.log('🎭 Starting Orchestra Desktop App...');
-  
-  // Start Python backend
-  startPythonBackend();
-  
-  // Wait for Python backend to be ready
-  console.log('⏳ Waiting for Python backend...');
-  const backendReady = await waitForServer(FLASK_PORT, 120);
-  
-  if (!backendReady) {
-    console.error('❌ Python backend failed to start');
-    app.quit();
-    return;
-  }
-  
-  console.log('✅ Python backend ready');
-  
-  // Start Express server for UI
-  startExpressServer();
-  
-  // Create window
-  setTimeout(() => {
-    createWindow();
-  }, 1000);
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+  // SECURITY: Register file protocol handler for safe file access
+  // This allows loading code execution results from /tmp only
+  protocol.registerFileProtocol('file', (request, callback) => {
+    const url = request.url.substr(7); // Remove 'file://'
+    
+    // SECURITY: Only allow files from /tmp (code execution results)
+    // and the app's own resources
+    if (url.startsWith('/tmp/') || url.includes('orchestra-ui-complete')) {
+      callback({ path: url });
+    } else {
+      console.warn(`[SECURITY] Blocked file access: ${url}`);
+      callback({ error: -6 }); // FILE_NOT_FOUND
     }
   });
+
+  startPythonBackend();
+  console.log('Waiting for backend to start...');
+  await waitForBackend();
+  await createWindow();
 });
 
 app.on('window-all-closed', () => {
-  // Clean up
-  if (pythonProcess) {
-    pythonProcess.kill();
-  }
-  if (expressServer) {
-    expressServer.close();
-  }
-  
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill();
-  }
-  if (expressServer) {
-    expressServer.close();
-  }
-});
-
-// IPC Handlers
-ipcMain.handle('get-app-path', () => {
-  return app.getPath('userData');
-});
-
-ipcMain.handle('upload-file', async (event, filePath) => {
-  // Handle file uploads to Python backend
-  const fetch = (await import('node-fetch')).default;
-  const FormData = (await import('form-data')).default;
-  const fs = require('fs');
-  
-  const formData = new FormData();
-  formData.append('file', fs.createReadStream(filePath));
-  
-  const response =  await fetch('http://localhost:' + FLASK_PORT + '/api/upload', {
-    method: 'POST',
-    body: formData
-  });
-  
-  return await response.json();
+app.on('before-quit', () => {
+  if (pythonProcess) pythonProcess.kill();
 });

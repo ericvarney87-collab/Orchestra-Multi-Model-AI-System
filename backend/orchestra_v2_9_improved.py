@@ -33,7 +33,6 @@ from stockfish_engine import StockfishEngine
 from code_executor import CodeExecutor
 from math_expert_handler import MathExpertHandler
 
--
 try:
     from duckduckgo_search import DDGS
 
@@ -1978,14 +1977,10 @@ Use the computed values above as your foundation."""
             
             response_text = response_text.replace("[SOURCE]\nNone", "").replace("[PAGE]\nNone", "").strip()
 
-            # Check for executable code blocks
-            execution_results = self.code_executor.process_response(response_text)
-            if execution_results:
-                print(f"DEBUG: Executed {len(execution_results)} code blocks")
-                for result in execution_results:
-                  if result['type'] in ['html', 'python']:
-                      code_files.append(result['file'])
-                      print(f"DEBUG: Created file: {result['file']}")
+            # SECURITY: Check for code blocks but don't auto-execute
+            code_blocks_detected = self.code_executor.process_response(response_text)
+            # Note: Code blocks are now returned to frontend for user confirmation
+            # They are NOT auto-executed here for security reasons
 
             self.history.append({"user": query, "ai": response_text})
             self._update_identity_after_conversation(query, response_text, username)

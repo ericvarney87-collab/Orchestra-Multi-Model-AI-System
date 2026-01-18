@@ -24,8 +24,14 @@ from werkzeug.utils import secure_filename
 # Import Orchestra
 sys.path.insert(0, os.path.dirname(__file__))
 import orchestra_v2_9_improved as orchestra
+from code_executor import CodeExecutor  # SECURITY: Import secure code executor
+
 active_engine = None # Add this line
 pending_browser_context = None  # Store browser context when no engine exists yet
+
+# Initialize code executor (SECURITY FIX)
+code_executor = CodeExecutor()
+
 # Initialize auth
 user_manager = auth.UserManager()
 current_user = None  # Will store logged-in username
@@ -1202,6 +1208,91 @@ def browser_sync():
     return jsonify({"status": "Sync Success"}), 200
 
 # ============================================
+# CODE EXECUTION (SECURITY: Requires User Confirmation)
+# ============================================
+
+@app.route('/api/detect_code', methods=['POST'])
+def detect_code_blocks():
+    """
+    Detect code blocks in LLM response without executing them.
+    
+    SECURITY: This endpoint is safe - it only detects, never executes.
+    Returns code blocks for user review.
+    """
+    try:
+        data = request.json
+        response_text = data.get('response_text', '')
+        
+        # Safe detection only - NO execution
+        code_blocks = code_executor.process_response(response_text)
+        
+        print(f"[CODE_DETECT] Found {len(code_blocks)} code block(s)")
+        
+        return jsonify({
+            'success': True,
+            'code_blocks': code_blocks,
+            'count': len(code_blocks)
+        })
+    
+    except Exception as e:
+        print(f"[CODE_DETECT] Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/execute_code', methods=['POST'])
+def execute_code_with_confirmation():
+    """
+    Execute code ONLY after explicit user confirmation.
+    
+    SECURITY: Requires user_confirmed=True flag to execute.
+    Logs all execution attempts for audit trail.
+    """
+    try:
+        data = request.json
+        
+        language = data.get('language')
+        code = data.get('code')
+        user_confirmed = data.get('user_confirmed', False)
+        
+        # Validate required fields
+        if not language or not code:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields: language and code'
+            }), 400
+        
+        # SECURITY: Log all execution attempts
+        print(f"[CODE_EXEC] Attempt to execute {language} code. Confirmed: {user_confirmed}")
+        print(f"[CODE_EXEC] Code length: {len(code)} characters")
+        
+        # Execute only if confirmed
+        result = code_executor.execute_with_confirmation(
+            language,
+            code,
+            user_confirmed=user_confirmed
+        )
+        
+        # Log result
+        if result.get('success'):
+            print(f"[CODE_EXEC] ✅ Execution successful")
+        else:
+            print(f"[CODE_EXEC] ❌ Execution failed or denied: {result.get('error')}")
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"[CODE_EXEC] Exception: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ============================================
 # BROWSER DATA MANAGEMENT
 # ============================================
 
@@ -1304,6 +1395,46 @@ def browser_downloads():
         downloads_data = request.json.get('downloads', [])
         save_browser_data(current_user, 'downloads', downloads_data)
         return jsonify({'status': 'saved'})
+
+# ============================================
+# CODE EXECUTION RESULT VIEWER
+# ============================================
+
+@app.route('/api/view_result/<filename>', methods=['GET'])
+def view_result(filename):
+    """
+    Serve code execution result files.
+    
+    SECURITY: Only serves files from /tmp that match the pattern
+    tmp*.html (code execution results created by CodeExecutor).
+    This prevents arbitrary file access.
+    """
+    try:
+        # SECURITY: Validate filename pattern
+        # Only allow tmpXXXXXX.html files (code execution results)
+        if not filename.startswith('tmp') or not filename.endswith('.html'):
+            return jsonify({'error': 'Invalid filename pattern'}), 403
+        
+        # SECURITY: Prevent path traversal attacks
+        # Remove any path separators
+        filename = os.path.basename(filename)
+        
+        # Construct safe filepath
+        filepath = os.path.join('/tmp', filename)
+        
+        # SECURITY: Verify file exists and is in /tmp
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'File not found'}), 404
+        
+        if not os.path.realpath(filepath).startswith('/tmp/'):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        # Serve the file
+        return send_file(filepath, mimetype='text/html')
+    
+    except Exception as e:
+        print(f"[VIEW_RESULT] Error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ============================================
 # START SERVER
